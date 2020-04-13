@@ -12,19 +12,29 @@
 #include <stdint.h>
 #include <string.h>
 
+static void write_to_stdin(ssize_t bits, uint8_t *buffer) {
+	while((bits = read(STDIN_FILENO, buffer, sizeof(buffer))) > 0) {
+		write(STDOUT_FILENO, buffer, sizeof(buffer));
+	}
+}
 
 int main(int argc, char* argv[]) {
 
 	uint8_t buf[BUF_LEN];
-	ssize_t bytes;
+	ssize_t bytes = 0;
 
-	if(argc == 1 || !strcmp(argv[1], "-")) {
-		while((bytes = read(STDIN_FILENO, buf, sizeof(buf))) != 0) {
-			write(STDIN_FILENO, buf, sizeof(buf));
-		}
+	if(argc == 1) {
+		write_to_stdin(bytes, buf);
 		return 0;
 	}
 	for(int i = argc - 1; i > 0; i--) {
+		if(!strcmp(argv[i], "-")) {
+			write_to_stdin(bytes, buf);
+			i--;
+		}
+		if(i == 0) {
+			return 0;
+		}
 		uint8_t fd = open(argv[i], O_RDONLY);
 		if( fd < 0) {
 			warn("%s", argv[i]);
@@ -38,9 +48,10 @@ int main(int argc, char* argv[]) {
 			if(bytes == 0) {
 				break;
 			}
-			//bytes = read(fd, buf, sizeof(buf));
 			bytes = write(STDOUT_FILENO, buf, bytes);
 		}
 		close(fd);
 	}
 }
+
+
