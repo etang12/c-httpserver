@@ -1,16 +1,15 @@
 //#include "dog.h"
 #define BUF_LEN 256
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <err.h>
-#include <errno.h>
-#include <unistd.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <unistd.h>
 #include <string.h>
+#include <err.h>
+
 
 static void write_to(ssize_t b, uint8_t *buffer) {
 	while((b = read(STDIN_FILENO, buffer, sizeof(buffer)) > 0)) {
@@ -29,7 +28,6 @@ int main(int argc, char* argv[]) {
 	}
 	for(int i = argc - 1; i > 0; i--) {
 		if(!strcmp(argv[i], "-")) {
-			bytes = 0;
 			write_to(bytes, buf);
 			i--;
 		}
@@ -40,13 +38,9 @@ int main(int argc, char* argv[]) {
 		if( fd < 0) {
 			warn("%s", argv[i]);
 		}
-		while(1) {
-			bytes = read(fd, buf, sizeof(buf));
+		while((bytes = read(fd, buf, sizeof(buf))) > 0) {
 			if(bytes < 0) {
 				warn("%s", argv[i]);
-				break;
-			}
-			if(bytes == 0) {
 				break;
 			}
 			bytes = write(STDOUT_FILENO, buf, bytes);
