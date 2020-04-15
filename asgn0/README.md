@@ -1,4 +1,4 @@
-Run the Makefile by typing make to compile dog.c
+Run the Makefile by typing make to compile dog.c.
 
 After dog.c is compiled there will be a file called dog that can be run by typing ./dog.
 
