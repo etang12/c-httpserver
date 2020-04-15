@@ -1,5 +1,4 @@
-//#include "dog.h"
-#define BUF_LEN 256
+#define BUF_LEN 4096
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -45,12 +44,10 @@ int main(int argc, char* argv[]) {
 		ssize_t fd = open(argv[i], O_RDONLY);
 		if( fd < 0) {
 			warn("%s", argv[i]);
-
 		}
 		while(1){
 			ssize_t bytes_read = read(fd, buf, sizeof(buf));
 			if(bytes_read < 0) {
-				//warn("%s", argv[i]);
 				break;
 			} else if(bytes_read == 0){
 				break;
