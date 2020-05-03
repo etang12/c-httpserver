@@ -54,17 +54,14 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
     //char* body_check = strstr((char*)&message->buffer, "\r\n\r\n");
     //printf("%s\n", body_check);
     char* token = strtok((char*)&message->buffer, "\r\n");
-    printf("this is first token: %s\n", token);
+    //printf("this is first token: %s\n", token);
     sscanf(token, "%s %s %s", message->method, message->filename, message->httpversion);
     //printf("http version: %s\n", message->httpversion);
-    printf("filename: %s\n", message->filename);
+    //printf("filename: %s\n", message->filename);
     //printf("%s %s\n", message->filename, message->httpversion);
     //printf("token: %s\n", token);
     if(strlen(message->filename) > 28){
         //printf("filename: %s\n", message->filename);
-        printf("strlen: %lu\n",strlen("___0246abcdefghijzyxwvutsrq"));
-        printf("length of file name\n");
-        printf("length: %lu\n", strlen(message->filename));
         message->status_code = 400;
         dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
@@ -314,7 +311,7 @@ int main(int argc, char** argv) {
         Connecting with a client
     */
     struct sockaddr client_addr;
-    socklen_t client_addrlen;
+    socklen_t client_addrlen = sizeof(client_addr);
 
     struct httpObject message;
 
