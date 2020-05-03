@@ -16,7 +16,7 @@
 #define BUFFER_SIZE 4096
 #define BODY_BUFFER_SIZE 32768
 #define METHOD_MAX_SIZE 5
-#define FILENAME_MAX_SIZE 28
+#define FILENAME_MAX_SIZE 29
 #define HTTPSIZE 9
 
 struct httpObject {
@@ -28,7 +28,6 @@ struct httpObject {
     char method[METHOD_MAX_SIZE];         // PUT, HEAD, GET
     char filename[FILENAME_MAX_SIZE];      // what is the file we are worried about
     char httpversion[HTTPSIZE];    // HTTP/1.1
-    char* body; //contents of body
     ssize_t content_length; // example: 13
     int status_code;
     uint8_t buffer[BUFFER_SIZE];
@@ -55,11 +54,17 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
     //char* body_check = strstr((char*)&message->buffer, "\r\n\r\n");
     //printf("%s\n", body_check);
     char* token = strtok((char*)&message->buffer, "\r\n");
-    //printf("this is first token: %s\n", token);
+    printf("this is first token: %s\n", token);
     sscanf(token, "%s %s %s", message->method, message->filename, message->httpversion);
-    //char* filename;
-    //strcpy(filename, message->filename);
+    //printf("http version: %s\n", message->httpversion);
+    printf("filename: %s\n", message->filename);
+    //printf("%s %s\n", message->filename, message->httpversion);
+    //printf("token: %s\n", token);
     if(strlen(message->filename) > 28){
+        //printf("filename: %s\n", message->filename);
+        printf("strlen: %lu\n",strlen("___0246abcdefghijzyxwvutsrq"));
+        printf("length of file name\n");
+        printf("length: %lu\n", strlen(message->filename));
         message->status_code = 400;
         dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
@@ -68,6 +73,7 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
     //printf("len: %d\n", len);
     if(strlen(message->filename) != len){       //check for valid chars in resource name
         message->status_code = 400;
+        printf("bad ascii char\n");
         dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
     }
@@ -88,6 +94,7 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
         
     if(strlen(token) > BUFFER_SIZE){
         message->status_code = 400;
+        printf("header larger than 4096\n");
         dprintf(client_sockd, "%s %d Bad Request\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
     }
