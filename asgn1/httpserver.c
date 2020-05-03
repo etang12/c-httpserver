@@ -57,6 +57,8 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
     char* token = strtok((char*)&message->buffer, "\r\n");
     //printf("this is first token: %s\n", token);
     sscanf(token, "%s %s %s", message->method, message->filename, message->httpversion);
+    //char* filename;
+    //strcpy(filename, message->filename);
     if(strlen(message->filename) > 28){
         message->status_code = 400;
         dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
@@ -259,7 +261,7 @@ int main(int argc, char** argv) {
     /*
         Create sockaddr_in with server information
     */
-    char* port = "8080";
+    char* port = argv[1];
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
