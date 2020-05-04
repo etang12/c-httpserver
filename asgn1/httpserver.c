@@ -158,14 +158,13 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
             message->status_code = 201;
         }
         struct stat statbuf;
-        int ret = stat(message->filename, &statbuf);
-        printf("%d\n", ret);
-        /*(if((statbuf.st_mode & S_IRUSR) == 0){       //file not readable
+        stat(message->filename, &statbuf);
+        if((statbuf.st_mode & S_IWUSR) == 0){       //file not readable
             message->status_code = 403;
-            printf("in here bro\n");
+            //printf("in here bro\n");
             dprintf(client_sockd, "%s %d Forbidden\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
             return;
-        }*/
+        }
         ssize_t putfd = open(message->filename, O_CREAT|O_WRONLY|O_TRUNC, 0644);       //creates a new file if it doesn't exist, overwrites it if it does
         //printf("putfd: %zd\n", putfd);
         if(putfd < 0){
@@ -177,19 +176,19 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
         }
         int cont_len = message->content_length; 
         if(cont_len == 0){
-            //write(putfd, body_buffer, 0);
-        if(message->status_code == 200){
-            dprintf(client_sockd, "%s %d OK\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
-        } else if(message->status_code == 201){
-            dprintf(client_sockd, "%s %d Created\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
-        }
+
+            if(message->status_code == 200){
+                dprintf(client_sockd, "%s %d OK\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+            } else if(message->status_code == 201){
+                dprintf(client_sockd, "%s %d Created\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+            }
         }
         ssize_t bytes_recv = recv(client_sockd, body_buffer, BODY_BUFFER_SIZE, 0);
-        printf("first bytes_recv: %zu\n", bytes_recv);
+        //printf("first bytes_recv: %zu\n", bytes_recv);
         if(bytes_recv <= BODY_BUFFER_SIZE){             //check if bytes_recv is less than buffer size    
             while(true){
                 cont_len = cont_len - bytes_recv;       //decrement cont_len by number of bytes recv after each iteration to handle any sized files
-                printf("in loop\n");
+                //printf("in loop\n");
                 ssize_t bytes_written = write(putfd, body_buffer, bytes_recv);         //writes contents of body from request into the created file which is saved in the server
                 if(bytes_written < 0){
                     message->status_code = 500;
@@ -221,6 +220,13 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
         }
         //printf("%d\n",file_reg);
         if(file_reg == 0){      
+            message->status_code = 403;
+            dprintf(client_sockd, "%s %d Forbidden\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+            return;
+        }
+        struct stat statbuf;
+        stat(message->filename, &statbuf);
+        if((statbuf.st_mode & S_IRUSR) == 0){       //file not readable
             message->status_code = 403;
             dprintf(client_sockd, "%s %d Forbidden\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
             return;
@@ -271,6 +277,14 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
     if(file_exists != 0){
         message->status_code = 404;
         dprintf(client_sockd, "%s %d Not Found\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+        return;
+    }
+    struct stat statbuf;
+    stat(message->filename, &statbuf);
+    if((statbuf.st_mode & S_IRUSR) == 0){       //file not readable
+        message->status_code = 403;
+        //printf("in here bro\n");
+        dprintf(client_sockd, "%s %d Forbidden\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
     }
     ssize_t headfd = open(message->filename, O_RDONLY);
