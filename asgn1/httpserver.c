@@ -150,20 +150,19 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
     uint8_t body_buffer[BODY_BUFFER_SIZE];
     int file_exists = if_exists(message->filename);
     //int file_reg = is_regular_file(message->filename);
-
+    /*struct stat statbuf;
+    stat(message->filename, &statbuf);
+    if((statbuf.st_mode & S_IWUSR) == S_IWUSR || (statbuf.st_mode & S_IRUSR) == S_IRUSR){       //file not writeable or readable
+        message->status_code = 403;
+        printf("in here bro\n");
+        dprintf(client_sockd, "%s %d Forbidden\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+        return;
+    }*/
     if(strcmp(message->method, "PUT") == 0){
         if(file_exists == 0){
             message->status_code = 200;
         } else {
             message->status_code = 201;
-        }
-        struct stat statbuf;
-        stat(message->filename, &statbuf);
-        if((statbuf.st_mode & S_IWUSR) == 0){       //file not readable
-            message->status_code = 403;
-            //printf("in here bro\n");
-            dprintf(client_sockd, "%s %d Forbidden\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
-            return;
         }
         ssize_t putfd = open(message->filename, O_CREAT|O_WRONLY|O_TRUNC, 0644);       //creates a new file if it doesn't exist, overwrites it if it does
         //printf("putfd: %zd\n", putfd);
@@ -283,7 +282,6 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
     stat(message->filename, &statbuf);
     if((statbuf.st_mode & S_IRUSR) == 0){       //file not readable
         message->status_code = 403;
-        //printf("in here bro\n");
         dprintf(client_sockd, "%s %d Forbidden\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
     }
