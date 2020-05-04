@@ -144,24 +144,28 @@ int is_regular_file(char *filename){    //check if object is actually a file, re
     stat(filename, &statbuf);
     return S_ISREG(statbuf.st_mode);
 }
+
 //HANDLE PUT REQUEST
 void process_request(ssize_t client_sockd, struct httpObject* message) {
     uint8_t body_buffer[BODY_BUFFER_SIZE];
     int file_exists = if_exists(message->filename);
-    int file_reg = is_regular_file(message->filename);
-    printf("%s\n", message->filename);
+    //int file_reg = is_regular_file(message->filename);
+
     if(strcmp(message->method, "PUT") == 0){
-        printf("%d\n", file_reg);
-        if(file_exists == 0 && file_reg != 0){
+        if(file_exists == 0){
             message->status_code = 200;
-            printf("file exists\n");
-        } else if(file_reg == 0){      
-            message->status_code = 403;
-            dprintf(client_sockd, "%s %d Forbidden\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
-            return;
         } else {
             message->status_code = 201;
         }
+        struct stat statbuf;
+        int ret = stat(message->filename, &statbuf);
+        printf("%d\n", ret);
+        /*(if((statbuf.st_mode & S_IRUSR) == 0){       //file not readable
+            message->status_code = 403;
+            printf("in here bro\n");
+            dprintf(client_sockd, "%s %d Forbidden\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+            return;
+        }*/
         ssize_t putfd = open(message->filename, O_CREAT|O_WRONLY|O_TRUNC, 0644);       //creates a new file if it doesn't exist, overwrites it if it does
         //printf("putfd: %zd\n", putfd);
         if(putfd < 0){
@@ -171,40 +175,39 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
             }
             return;
         }
-        //printf("before recv\n");
-        //ssize_t bytes_recv = recv(client_sockd, body_buffer, BODY_BUFFER_SIZE, 0);
-        //printf("first bytes_recv: %zu\n", bytes_recv);
-        int cont_len = message->content_length;     
-        if(cont_len == 0){       // case for zero byte file, skip recv if zero byte file
-            write(putfd, body_buffer, 0);
-            if(message->status_code == 200){
-            dprintf(client_sockd, "%s %d OK\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
-            } else if(message->status_code == 201){
-            dprintf(client_sockd, "%s %d Created\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
-            }
-            return;
-        }
-        while(true){
-            ssize_t bytes_recv = recv(client_sockd, body_buffer, BODY_BUFFER_SIZE, 0);
-            cont_len = cont_len - bytes_recv;       //decrement cont_len by number of bytes recv after each iteration to handle any sized files
-            printf("in loop\n");
-            ssize_t bytes_written = write(putfd, body_buffer, bytes_recv);         //writes contents of body from request into the created file which is saved in the server
-            if(bytes_written < 0){
-                message->status_code = 500;
-                dprintf(client_sockd, "%s %d Internal Server Error\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
-            }
-            if(cont_len == 0){
-                break;
-            }
-        }
+        int cont_len = message->content_length; 
+        if(cont_len == 0){
+            //write(putfd, body_buffer, 0);
         if(message->status_code == 200){
             dprintf(client_sockd, "%s %d OK\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         } else if(message->status_code == 201){
             dprintf(client_sockd, "%s %d Created\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         }
-        close(putfd);
-        return;
-         
+        }
+        ssize_t bytes_recv = recv(client_sockd, body_buffer, BODY_BUFFER_SIZE, 0);
+        printf("first bytes_recv: %zu\n", bytes_recv);
+        if(bytes_recv <= BODY_BUFFER_SIZE){             //check if bytes_recv is less than buffer size    
+            while(true){
+                cont_len = cont_len - bytes_recv;       //decrement cont_len by number of bytes recv after each iteration to handle any sized files
+                printf("in loop\n");
+                ssize_t bytes_written = write(putfd, body_buffer, bytes_recv);         //writes contents of body from request into the created file which is saved in the server
+                if(bytes_written < 0){
+                    message->status_code = 500;
+                    dprintf(client_sockd, "%s %d Internal Server Error\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+                }
+                if(cont_len == 0){
+                    break;
+                }
+                bytes_recv = recv(client_sockd, body_buffer, BODY_BUFFER_SIZE, 0);
+            }
+            if(message->status_code == 200){
+                dprintf(client_sockd, "%s %d OK\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+            } else if(message->status_code == 201){
+                dprintf(client_sockd, "%s %d Created\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+            }
+            close(putfd);
+            return;
+        } 
     }
     //HANDLE GET REQUEST
     else if(strcmp(message->method, "GET") == 0){
