@@ -51,7 +51,7 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
     
     recv(client_sockd, message->buffer, sizeof(message->buffer), 0);
     //printf("%s", message->buffer);
-    //char* body_check = strstr((char*)&message->buffer, "\r\n\r\n");
+    char* body_check = strstr((char*)&message->buffer, "\r\n\r\n");
     //printf("%s\n", body_check);
     char* token = strtok((char*)&message->buffer, "\r\n");
     //printf("this is first token: %s\n", token);
@@ -78,19 +78,21 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
         message->status_code = 400;
         printf("bad http char\n");
         dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+        return;
     }
     memmove(message->filename, (message->filename)+1, strlen(message->filename));
     //printf("%s %s %s\n", message->method, message->filename, message->httpversion);
     
     //printf("0x%" PRIXPTR "\n", (uintptr_t) ((body_in_header)));
-    //printf("this is strstr len: %d\n", strlen(body_check);
-    /*if(strlen(body_check) > 4){        //check if request contains header and body (bad request)
+    /*printf("this is strstr len: %d\n", strlen(body_check));
+    printf("%s\n", body_check);
+    if((body_check + 4) != NULL){        //check if request contains header and body (bad request)
         printf("strlen: %lu\n", strlen(body_check));
         //uint8_t responseBuffer[BUFFER_SIZE];
         message->status_code = 400;
-        //printf("no body in header, good request\n");
         printf("send response 400 bad request and close socket\n");
         dprintf(client_sockd, "%s %d Bad Request\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+        return;
         
     }*/
         
@@ -150,16 +152,15 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
     uint8_t body_buffer[BODY_BUFFER_SIZE];
     int file_exists = if_exists(message->filename);
     //int file_reg = is_regular_file(message->filename);
-    /*struct stat statbuf;
-    stat(message->filename, &statbuf);
-    if((statbuf.st_mode & S_IWUSR) == S_IWUSR || (statbuf.st_mode & S_IRUSR) == S_IRUSR){       //file not writeable or readable
-        message->status_code = 403;
-        printf("in here bro\n");
-        dprintf(client_sockd, "%s %d Forbidden\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
-        return;
-    }*/
     if(strcmp(message->method, "PUT") == 0){
         if(file_exists == 0){
+            struct stat statbuf;
+            stat(message->filename, &statbuf);
+            if((statbuf.st_mode & S_IWUSR) == 0){       //file not writeable
+                message->status_code = 403;
+                dprintf(client_sockd, "%s %d Forbidden\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+                return;
+            }
             message->status_code = 200;
         } else {
             message->status_code = 201;
@@ -175,7 +176,6 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
         }
         int cont_len = message->content_length; 
         if(cont_len == 0){
-
             if(message->status_code == 200){
                 dprintf(client_sockd, "%s %d OK\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
             } else if(message->status_code == 201){
