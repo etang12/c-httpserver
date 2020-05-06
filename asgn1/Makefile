@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -g -Wall
+CFLAGS = -g -Wall -Wextra -Wpedantic -Wshadow
 TARGET = httpserver
 
 all: $(TARGET)

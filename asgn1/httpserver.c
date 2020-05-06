@@ -5,10 +5,10 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <fcntl.h>
-#include <unistd.h> // write
-#include <string.h> // memset
-#include <stdlib.h> // atoi
-#include <stdbool.h> // true, false
+#include <unistd.h>
+#include <string.h> 
+#include <stdlib.h> 
+#include <stdbool.h> 
 #include <inttypes.h>
 #include <err.h>
 #include <errno.h>
@@ -51,22 +51,18 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
     
     recv(client_sockd, message->buffer, sizeof(message->buffer), 0);
     //printf("%s", message->buffer);
-    char* body_check = strstr((char*)&message->buffer, "\r\n\r\n");
+    //char* body_check = strstr((char*)&message->buffer, "\r\n\r\n");
     //printf("%s\n", body_check);
     char* token = strtok((char*)&message->buffer, "\r\n");
     //printf("this is first token: %s\n", token);
     sscanf(token, "%s %s %s", message->method, message->filename, message->httpversion);
-    //printf("http version: %s\n", message->httpversion);
-    //printf("filename: %s\n", message->filename);
-    //printf("%s %s\n", message->filename, message->httpversion);
-    //printf("token: %s\n", token);
     if(strlen(message->filename) > 28){
         //printf("filename: %s\n", message->filename);
         message->status_code = 400;
         dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
     }
-    int len = strspn(message->filename ,"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_/");
+    unsigned long len = strspn(message->filename ,"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_/");
     //printf("len: %d\n", len);
     if(strlen(message->filename) != len){       //check for valid chars in resource name
         message->status_code = 400;
@@ -81,20 +77,6 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
         return;
     }
     memmove(message->filename, (message->filename)+1, strlen(message->filename));
-    //printf("%s %s %s\n", message->method, message->filename, message->httpversion);
-    
-    //printf("0x%" PRIXPTR "\n", (uintptr_t) ((body_in_header)));
-    /*printf("this is strstr len: %d\n", strlen(body_check));
-    printf("%s\n", body_check);
-    if((body_check + 4) != NULL){        //check if request contains header and body (bad request)
-        printf("strlen: %lu\n", strlen(body_check));
-        //uint8_t responseBuffer[BUFFER_SIZE];
-        message->status_code = 400;
-        printf("send response 400 bad request and close socket\n");
-        dprintf(client_sockd, "%s %d Bad Request\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
-        return;
-        
-    }*/
         
     if(strlen(token) > BUFFER_SIZE){
         message->status_code = 400;
@@ -211,7 +193,7 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
     else if(strcmp(message->method, "GET") == 0){
         int file_size = get_file_size(message->filename);
         int file_reg = is_regular_file(message->filename);
-        int file_exists = if_exists(message->filename);
+        //int file_exists = if_exists(message->filename);
         if(file_exists != 0){
             message->status_code = 404;
             dprintf(client_sockd, "%s %d Not Found\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
@@ -272,7 +254,7 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
     //HANDLE HEAD REQUEST
     else if(strcmp(message->method, "HEAD") == 0){
     int file_size = get_file_size(message->filename);
-    int file_exists = if_exists(message->filename);
+    //int file_exists = if_exists(message->filename);
     if(file_exists != 0){
         message->status_code = 404;
         dprintf(client_sockd, "%s %d Not Found\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
@@ -311,6 +293,9 @@ int main(int argc, char** argv) {
     /*
         Create sockaddr_in with server information
     */
+    if(argc > 2){
+        EXIT_FAILURE;
+    }
     char* port = argv[1];
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
