@@ -62,7 +62,6 @@ typedef struct threadarg_t{
 int cb_dequeue(circleBuffer *cb){
     int client_fd;
     //printf("process: %d\n", pindex);
-    pthread_mutex_lock(cb->mut);
     while(cb->q_size == 0){
         pthread_cond_wait(&worker_cond, cb->mut);
     }
@@ -74,16 +73,12 @@ int cb_dequeue(circleBuffer *cb){
     } else {
         cb->head = (cb->head + 1) % cb->max_size;
     }
-
-    pthread_mutex_unlock(cb->mut);
-    pthread_cond_signal(&dispatcher_cond);
     cb->q_size--;
     printf("dequeued: %d\n", client_fd);
     return client_fd;
 }
 
 void cb_enqueue(circleBuffer *cb, int client){
-    pthread_mutex_lock(cb->mut);
     //handle case if cb->pqsize is full
     while(cb->q_size == cb->max_size){
         pthread_cond_wait(&dispatcher_cond, cb->mut);
@@ -95,9 +90,6 @@ void cb_enqueue(circleBuffer *cb, int client){
     cb->clientfd_queue[cb->tail] = client;
     printf("enqueued: %d\n", cb->clientfd_queue[cb->tail]);
     cb->q_size++;
-    
-    pthread_mutex_unlock(cb->mut);
-    pthread_cond_signal(&worker_cond);
 }
 
 
@@ -398,7 +390,10 @@ void* thread_func(void* arg){   //dequeue from buffer
     //httpObject *pmsg = &parg->cb->msg;
         while(true){
             printf("--------------------------------------------\n");
+            pthread_mutex_lock(parg->cb->mut);
             int c_fd = cb_dequeue(parg->cb);
+            pthread_mutex_unlock(parg->cb->mut);
+            pthread_cond_signal(&dispatcher_cond);
             read_http_request(c_fd, &parg->msg);
             //printf("c_fd: %d\n", c_fd);
             process_request(c_fd, &parg->msg);
@@ -473,9 +468,6 @@ int main(int argc, char** argv) {
         //printf("thread: %d\n", i);
     }
 
-    
-
-
     /*
         Create sockaddr_in with server information
     */
@@ -536,7 +528,10 @@ int main(int argc, char** argv) {
          * 1. Accept Connection
          */
         int client_sockd = accept(server_sockd, &client_addr, &client_addrlen);
+        pthread_mutex_lock(circleBuff.mut);
         cb_enqueue(&circleBuff, client_sockd);
+        pthread_mutex_unlock(circleBuff.mut);
+        pthread_cond_signal(&worker_cond);
         /*for(int x = 0; x < circleBuff.pq_size; x++){
             printf("full buffer: %d\n", circleBuff.clientfd_queue[x]);
         }*/
