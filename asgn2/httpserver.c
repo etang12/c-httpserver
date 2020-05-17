@@ -419,6 +419,7 @@ void* thread_func(void* arg){   //dequeue from buffer
 
 int main(int argc, char** argv) {
     char* port;
+    char* threads = NULL;
     char* log_name = NULL;
     int NUM_THREADS = 0;
     int c;
@@ -431,7 +432,8 @@ int main(int argc, char** argv) {
     while((c = getopt(argc, argv, "N:l:")) != -1){
         switch(c){
             case 'N':
-                NUM_THREADS = atoi(optarg);
+                threads = optarg;
+                NUM_THREADS = atoi(threads);
                 break;
             case 'l':
                 log_name = optarg;
@@ -453,6 +455,11 @@ int main(int argc, char** argv) {
     }
     if(NUM_THREADS == 0){
         NUM_THREADS = 4;
+    }
+    if(if_exists(log_name)){
+        int logfd = open(log_name, O_TRUNC, 0644);
+    } else {
+        int logfd = open(log_name, O_CREAT, 0644);
     }
     /*SETTING UP THE THREAD POOL, CIRCULAR BUFFER (QUEUE OF CLIENT FD'S), DISPATCHER THREAD */
     //printf("num_threads: %d\n", num_threads);
