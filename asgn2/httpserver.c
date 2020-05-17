@@ -66,12 +66,14 @@ int cb_dequeue(circleBuffer *cb){
         pthread_cond_wait(&worker_cond, cb->mut);
     }
     client_fd = cb->clientfd_queue[cb->head];
-    
+    cb->clientfd_queue[cb->head] = -1;
     if(cb->head == cb->tail){
         cb->head = -1;
         cb->tail = -1;
-    } else {
-        cb->head = (cb->head + 1) % cb->max_size;
+    } else if(cb->head == cb->max_size - 1){
+        cb->head = 0;
+    } else{
+        cb->head++;
     }
     cb->q_size--;
     printf("dequeued: %d\n", client_fd);
@@ -84,10 +86,15 @@ void cb_enqueue(circleBuffer *cb, int client){
         pthread_cond_wait(&dispatcher_cond, cb->mut);
     }
     if(cb->head == -1){
-        cb->head = 0;
+        cb->head = cb->tail = 0;
+        cb->clientfd_queue[cb->tail] = client;
+    } else if(cb->tail == cb->max_size - 1 && cb->head != 0){
+        cb->tail = 0;
+        cb->clientfd_queue[cb->tail] = client;
+    } else{
+        cb->tail++;
+        cb->clientfd_queue[cb->tail] = client;
     }
-    cb->tail = (cb->tail + 1) % cb->max_size;
-    cb->clientfd_queue[cb->tail] = client;
     printf("enqueued: %d\n", cb->clientfd_queue[cb->tail]);
     cb->q_size++;
 }
@@ -412,17 +419,19 @@ void* thread_func(void* arg){   //dequeue from buffer
 
 int main(int argc, char** argv) {
     char* port;
-    char* threads = NULL;
     char* log_name = NULL;
     int NUM_THREADS = 0;
     int c;
     int i = 0;
     opterr = 0;
+    if(argc < 2){
+        fprintf(stderr, "No arguments entered\n");
+        return EXIT_FAILURE;
+    }
     while((c = getopt(argc, argv, "N:l:")) != -1){
         switch(c){
             case 'N':
-                threads = optarg;
-                NUM_THREADS = atoi(threads);
+                NUM_THREADS = atoi(optarg);
                 break;
             case 'l':
                 log_name = optarg;
@@ -437,6 +446,10 @@ int main(int argc, char** argv) {
                 }
                 return EXIT_FAILURE;
         }
+    }
+    if(argc != optind + 1){
+        fprintf(stderr, "No port number entered\n");
+        return EXIT_FAILURE;
     }
     if(NUM_THREADS == 0){
         NUM_THREADS = 4;
@@ -506,7 +519,7 @@ int main(int argc, char** argv) {
     /*
         Listen for incoming connections
     */
-    ret = listen(server_sockd, 5); // 5 should be enough, if not use SOMAXCONN
+    ret = listen(server_sockd, SOMAXCONN); // 5 should be enough, if not use SOMAXCONN
 
     if (ret < 0) {
         return EXIT_FAILURE;
@@ -517,8 +530,6 @@ int main(int argc, char** argv) {
     */
     struct sockaddr client_addr;
     socklen_t client_addrlen = sizeof(client_addr);
-
-
 
     //dispatcher thread
     while (true) {
