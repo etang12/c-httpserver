@@ -16,12 +16,14 @@
 #include <ctype.h>
 
 #define BUFFER_SIZE 4096
-#define BODY_BUFFER_SIZE 10000
+#define BODY_BUFFER_SIZE 8000
+#define LOG_SIZE 4000
 #define METHOD_MAX_SIZE 5
 #define FILENAME_MAX_SIZE 29
 #define HTTPSIZE 9
 
 int entries = 0;
+int errors = 0;
 pthread_cond_t dispatcher_cond = PTHREAD_COND_INITIALIZER;
 pthread_cond_t worker_cond = PTHREAD_COND_INITIALIZER;
 
@@ -34,7 +36,7 @@ typedef struct httpObject {
     char method[METHOD_MAX_SIZE];         // PUT, HEAD, GET
     char filename[FILENAME_MAX_SIZE];      // what is the file we are worried about
     char httpversion[HTTPSIZE];    // HTTP/1.1
-    ssize_t content_length; // example: 13
+    size_t content_length; // example: 13
     int status_code;
     int body_tracker;       //flag to check if parts of body passed alongside header
     char* body_string;      //string that contains parts of body passed alongside header
@@ -57,6 +59,7 @@ typedef struct circular_buff_t{
 typedef struct threadarg_t{
     struct httpObject msg;
     circleBuffer *cb;
+    int logfd;
 } threadArg;
 
 int cb_dequeue(circleBuffer *cb){
@@ -76,7 +79,7 @@ int cb_dequeue(circleBuffer *cb){
         cb->head++;
     }
     cb->q_size--;
-    printf("dequeued: %d\n", client_fd);
+    //printf("dequeued: %d\n", client_fd);
     return client_fd;
 }
 
@@ -95,7 +98,7 @@ void cb_enqueue(circleBuffer *cb, int client){
         cb->tail++;
         cb->clientfd_queue[cb->tail] = client;
     }
-    printf("enqueued: %d\n", cb->clientfd_queue[cb->tail]);
+    //printf("enqueued: %d\n", cb->clientfd_queue[cb->tail]);
     cb->q_size++;
 }
 
@@ -143,6 +146,8 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
         }
     }
     char* ptr;
+    //char* buf_copy;
+    //strcpy(buf_copy, (char*)message->buffer);
     char* token = strtok_r((char*)&message->buffer, "\r\n", &ptr);
     //printf("this is first token: %s\n", token);
     sscanf(token, "%s %s %s", message->method, message->filename, message->httpversion);
@@ -185,7 +190,7 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
         //printf("token1: %s\n", token);
         if(strstr(token, "Content-Length") != NULL){
             //printf("token2: %s\n", token);
-            sscanf(token, "%*s %zu", &(message->content_length));
+            sscanf(token, "%*s %lu", &(message->content_length));
             break;
         }else if(strcmp(message->method, "GET") == 0 || strcmp(message->method, "HEAD") == 0){
             //printf("method name : %s\n", message->method);
@@ -226,14 +231,13 @@ int is_regular_file(char *filename){    //check if object is actually a file, re
     return S_ISREG(statbuf.st_mode);
 }
 
-//HANDLE PUT REQUEST
 void process_request(ssize_t client_sockd, struct httpObject* message) {
     uint8_t body_buffer[BODY_BUFFER_SIZE];
     int file_exists = if_exists(message->filename);
     int file_size = get_file_size(message->filename);
     int file_reg = is_regular_file(message->filename);
     if(strcmp(message->method, "PUT") == 0){
-        printf("in PUT: %s\n", message->filename);
+        //printf("in PUT: %s\n", message->filename);
         if(file_exists == 0){
             struct stat statbuf;
             stat(message->filename, &statbuf);
@@ -247,7 +251,7 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
             message->status_code = 201;
         }
         ssize_t putfd = open(message->filename, O_CREAT|O_WRONLY|O_TRUNC, 0644);       //creates a new file if it doesn't exist, overwrites it if it does
-        printf("open file: %s\n", message->filename);
+        //printf("open file: %s\n", message->filename);
         //printf("putfd: %zd\n", putfd);
         if(putfd < 0){
             if(errno == EACCES){
@@ -299,8 +303,8 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
     }
     //HANDLE GET REQUEST
     else if(strcmp(message->method, "GET") == 0){
-        printf("in GET: %s\n", message->filename);
-        printf("in GET client sockd: %zd\n", client_sockd);
+        //printf("in GET: %s\n", message->filename);
+        //printf("in GET client sockd: %zd\n", client_sockd);
         if(file_exists != 0){
             message->status_code = 404;
             dprintf(client_sockd, "%s %d Not Found\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
@@ -327,7 +331,6 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
         }
         ssize_t readfd = read(getfd, body_buffer, BODY_BUFFER_SIZE);
         if(readfd < 0){
-            printf("in read\n");
             message->status_code = 500;
             dprintf(client_sockd, "%s %d Internal Server Error\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
             return;
@@ -340,7 +343,6 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
             cont_len = cont_len - readfd;                      //decrement cont_len by number of bytes recv after each iteration to handle any sized files
             ssize_t bytes_written = write(client_sockd, body_buffer, readfd);         //writes contents of body from request into the created file which is saved in the server
             if(bytes_written < 0){
-                printf("in write\n");
                 message->status_code = 500;
                 dprintf(client_sockd, "%s %d Internal Server Error\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
             }
@@ -392,21 +394,59 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
     return;
 }
 
+void log_func(httpObject* msg){
+    uint8_t logBuffer[LOG_SIZE];
+    uint8_t fileBuffer[LOG_SIZE];
+    printf("in log func filename: %s\n", msg->filename);
+    size_t file_size = get_file_size(msg->filename);
+    printf("file_size: %ld\n", file_size);
+    size_t filefd = open(msg->filename, O_RDONLY);
+    size_t read_bytes = read(filefd, fileBuffer, LOG_SIZE);
+    int cont_len = file_size;
+    size_t lead_zero = 0;
+    size_t bytes_written = 0;
+    while(true){
+        cont_len = cont_len - read_bytes;
+        for(size_t idx = 0; idx < read_bytes; ++idx){
+            if(idx % 20 == 0){
+                if(idx != 0){
+                   bytes_written += snprintf((char*)logBuffer + bytes_written, 2, "\n");
+                }
+                
+               bytes_written += snprintf((char*)logBuffer + bytes_written, 10, "%08ld ", lead_zero);
+               lead_zero += 20;
+
+            }
+            bytes_written += snprintf((char*)logBuffer + bytes_written, 4, "%02x ", fileBuffer[idx]);
+        }
+        printf("%s\n", logBuffer);                  
+        if(cont_len == 0){
+            break;
+        }
+        read_bytes = read(filefd, fileBuffer, LOG_SIZE);
+    }
+    
+
+    
+
+}
 void* thread_func(void* arg){   //dequeue from buffer
     threadArg *parg = (threadArg*) arg;
     //httpObject *pmsg = &parg->cb->msg;
         while(true){
-            printf("--------------------------------------------\n");
+            //printf("--------------------------------------------\n");
             pthread_mutex_lock(parg->cb->mut);
             int c_fd = cb_dequeue(parg->cb);
             pthread_mutex_unlock(parg->cb->mut);
             pthread_cond_signal(&dispatcher_cond);
             read_http_request(c_fd, &parg->msg);
-            //printf("c_fd: %d\n", c_fd);
             process_request(c_fd, &parg->msg);
-            printf("method: %s\n", parg->msg.method);
-            printf("filename: /%s\n", parg->msg.filename);
-            printf("length: %zd\n", parg->msg.content_length);
+            if(parg->logfd > 0){
+                log_func(&parg->msg);
+            }
+            //printf("method: %s\n", parg->msg.method);
+            //printf("filename: /%s\n", parg->msg.filename);
+            //printf("length: %zd\n", parg->msg.content_length);
             memset(&parg->msg.buffer, '\0', BUFFER_SIZE);
             memset(&parg->msg.method, '\0', METHOD_MAX_SIZE);
             memset(&parg->msg.filename, '\0', FILENAME_MAX_SIZE);
@@ -456,11 +496,12 @@ int main(int argc, char** argv) {
     if(NUM_THREADS == 0){
         NUM_THREADS = 4;
     }
-    if(if_exists(log_name)){
-        int logfd = open(log_name, O_TRUNC, 0644);
-    } else {
-        int logfd = open(log_name, O_CREAT, 0644);
+    int logfd = -1;
+    if(log_name != NULL){
+        logfd = open(log_name, O_CREAT| O_WRONLY |O_TRUNC, 0644);
     }
+        
+    
     /*SETTING UP THE THREAD POOL, CIRCULAR BUFFER (QUEUE OF CLIENT FD'S), DISPATCHER THREAD */
     //printf("num_threads: %d\n", num_threads);
     //printf("log_name: %s\n", log_name);
@@ -483,6 +524,7 @@ int main(int argc, char** argv) {
     while(i < NUM_THREADS){
         args[i].cb = &circleBuff;
         args[i].msg = message;
+        args[i].logfd = logfd;
         pthread_create(&tid[i], NULL, thread_func, &args[i]);
         i++;
         //printf("thread: %d\n", i);
