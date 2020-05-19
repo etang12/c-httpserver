@@ -19,13 +19,15 @@
 #define BODY_BUFFER_SIZE 8000
 #define LOG_SIZE 4000
 #define METHOD_MAX_SIZE 5
-#define FILENAME_MAX_SIZE 29
+#define FILENAME_MAX_SIZE 256
 #define HTTPSIZE 9
 
 int entries = 0;
 int errors = 0;
+int offset = 0;
 pthread_cond_t dispatcher_cond = PTHREAD_COND_INITIALIZER;
 pthread_cond_t worker_cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t offset_lock = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct httpObject {
     /*
@@ -41,6 +43,7 @@ typedef struct httpObject {
     int body_tracker;       //flag to check if parts of body passed alongside header
     char* body_string;      //string that contains parts of body passed alongside header
     uint8_t buffer[BUFFER_SIZE];
+    char copyBuffer[FILENAME_MAX_SIZE];
 
 } httpObject;
 
@@ -124,9 +127,8 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
     
     while(total_bytes_recv < BUFFER_SIZE){
         ssize_t ret_bytes = recv(client_sockd, message->buffer + total_bytes_recv, BUFFER_SIZE - total_bytes_recv, 0);
-        message->buffer[ret_bytes] = '\0';
+        message->buffer[ret_bytes] = '\0';  //maybe add +1 to buffer to add null terminator at end after body
         char* body_check = strstr((char*)message->buffer, "\r\n\r\n");
-        //printf("%s\n", message->buffer);
         //printf("strlen: %lu\n", strlen(body_check));
         if(ret_bytes < 0){
             message->status_code = 500;
@@ -149,6 +151,8 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
     //char* buf_copy;
     //strcpy(buf_copy, (char*)message->buffer);
     char* token = strtok_r((char*)&message->buffer, "\r\n", &ptr);
+    strcpy(message->copyBuffer, token);
+    //printf("copy: %swhat it do\n", message->copyBuffer);
     //printf("this is first token: %s\n", token);
     sscanf(token, "%s %s %s", message->method, message->filename, message->httpversion);
 
@@ -173,7 +177,7 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
         return;
     }
     if(strcmp(message->method, "PUT") != 0 && strcmp(message->method, "GET") != 0 && strcmp(message->method, "HEAD") != 0){
-        printf("we in here big bruh\n");
+        //printf("we in here big bruh\n");
         message->status_code = 400;
         dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
@@ -394,42 +398,82 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
     return;
 }
 
-void log_func(httpObject* msg){
+void log_func(int logfd, httpObject* msg){
     uint8_t logBuffer[LOG_SIZE];
     uint8_t fileBuffer[LOG_SIZE];
-    printf("in log func filename: %s\n", msg->filename);
+    char filelength[30];
+    //printf("in log func filename: %s\n", msg->filename);
     size_t file_size = get_file_size(msg->filename);
-    printf("file_size: %ld\n", file_size);
+    //logBuffer[LOG_SIZE] = '\0';
+    
+    //printf("file_size: %ld\n", file_size);
     size_t filefd = open(msg->filename, O_RDONLY);
     size_t read_bytes = read(filefd, fileBuffer, LOG_SIZE);
+    fileBuffer[LOG_SIZE + 1] = '\0';
+    sprintf(filelength, "%ld", file_size);
     int cont_len = file_size;
     size_t lead_zero = 0;
     size_t bytes_written = 0;
-    while(true){
-        cont_len = cont_len - read_bytes;
-        for(size_t idx = 0; idx < read_bytes; ++idx){
-            if(idx % 20 == 0){
-                if(idx != 0){
-                   bytes_written += snprintf((char*)logBuffer + bytes_written, 2, "\n");
+    size_t file_len = strlen(filelength);
+    //printf("len: %ld\n", file_len);
+    int namelen = strlen(msg->filename + 1);
+    int methodlen = strlen(msg->method);
+    int fail_len = strlen(msg->copyBuffer);
+    //char* header = "%s /%s length %d\n"
+    //printf("logbuffer: %s\n", logBuffer);
+    //printf("status code: %d\n", msg->status_code);
+    if((msg->status_code == 400) | (msg->status_code == 404) | (msg->status_code == 403) | (msg->status_code == 500)){
+        bytes_written += snprintf((char*)logBuffer, (fail_len + 36) ,"FAIL: %s --- response %d\n========\n", msg->copyBuffer, msg->status_code);
+        //printf("%s\n", logBuffer);
+        pwrite(logfd, logBuffer, bytes_written, offset);
+        errors++;
+    } else {
+        bytes_written += snprintf((char*)logBuffer, (methodlen + namelen + file_len + 13), "%s /%s length %zd\n", msg->method, msg->filename, file_size);      //header
+        printf("written: %zd\n", bytes_written);
+        while(true){
+            cont_len = cont_len - read_bytes;
+            for(size_t idx = 0; idx < read_bytes; idx++){
+                if(idx % 20 == 0){
+                    if(idx != 0){
+                        bytes_written += snprintf((char*)logBuffer + bytes_written, 2, "\n");
+                    }
+                bytes_written += snprintf((char*)logBuffer + bytes_written, 10, "%08ld ", lead_zero);
+                lead_zero += 20;
                 }
+                bytes_written += snprintf((char*)logBuffer + bytes_written, 4, "%02x ", fileBuffer[idx]);
                 
-               bytes_written += snprintf((char*)logBuffer + bytes_written, 10, "%08ld ", lead_zero);
-               lead_zero += 20;
 
+                /*if(fileBuffer[idx] == '\0'){
+                    printf("cleared buffer\n");
+                    memset(fileBuffer, '\0', LOG_SIZE);
+                    bytes_written = 0;
+                    break;
+                } */
             }
-            bytes_written += snprintf((char*)logBuffer + bytes_written, 4, "%02x ", fileBuffer[idx]);
+            
+            if(strlen((char*)logBuffer) == bytes_written){
+                bytes_written += snprintf((char*)logBuffer + bytes_written, 12, "\n========\n");       //footer
+                pwrite(logfd, logBuffer, bytes_written, offset);
+                memset(logBuffer, '\0', LOG_SIZE);
+                break;
+            }
+            read_bytes = read(filefd, fileBuffer, LOG_SIZE);
+            printf("read\n");
         }
-        printf("%s\n", logBuffer);                  
-        if(cont_len == 0){
-            break;
-        }
-        read_bytes = read(filefd, fileBuffer, LOG_SIZE);
     }
-    
-
-    
-
+    entries++;
+    pthread_mutex_lock(&offset_lock);
+    offset = offset + bytes_written;
+    pthread_mutex_unlock(&offset_lock);
+    //printf("%s", logBuffer);
+    printf("entries: %d\n", entries);
+    printf("errors: %d\n", errors);
+    printf("bytes written: %ld\n", bytes_written);
+    printf("offset: %d\n", offset);
+    printf("sizeof logBuffer: %ld\n", strlen((char*)logBuffer));
+    //printf("------------------------------\n");
 }
+
 void* thread_func(void* arg){   //dequeue from buffer
     threadArg *parg = (threadArg*) arg;
     //httpObject *pmsg = &parg->cb->msg;
@@ -442,7 +486,7 @@ void* thread_func(void* arg){   //dequeue from buffer
             read_http_request(c_fd, &parg->msg);
             process_request(c_fd, &parg->msg);
             if(parg->logfd > 0){
-                log_func(&parg->msg);
+                log_func(parg->logfd, &parg->msg);
             }
             //printf("method: %s\n", parg->msg.method);
             //printf("filename: /%s\n", parg->msg.filename);
