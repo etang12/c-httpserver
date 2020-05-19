@@ -186,7 +186,7 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
         
     if(strlen(token) > BUFFER_SIZE){
         message->status_code = 400;
-        printf("header larger than 4096\n");
+        //printf("header larger than 4096\n");
         dprintf(client_sockd, "%s %d Bad Request\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
     }
@@ -427,6 +427,9 @@ void log_func(int logfd, httpObject* msg){
         //printf("%s\n", logBuffer);
         pwrite(logfd, logBuffer, bytes_written, offset);
         errors++;
+    } else if(strcmp(msg->method, "HEAD") == 0){
+        bytes_written += snprintf((char*)logBuffer, (methodlen + namelen + file_len + 23), "%s /%s length %zd\n========\n", msg->method, msg->filename, file_size);
+        pwrite(logfd, logBuffer, bytes_written, offset);
     } else {
         bytes_written += snprintf((char*)logBuffer, (methodlen + namelen + file_len + 13), "%s /%s length %zd\n", msg->method, msg->filename, file_size);      //header
         printf("written: %zd\n", bytes_written);
@@ -458,7 +461,6 @@ void log_func(int logfd, httpObject* msg){
                 break;
             }
             read_bytes = read(filefd, fileBuffer, LOG_SIZE);
-            printf("read\n");
         }
     }
     entries++;
