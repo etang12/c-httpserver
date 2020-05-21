@@ -18,7 +18,7 @@
 
 #define BUFFER_SIZE 4096
 #define BODY_BUFFER_SIZE 8000
-#define LOG_SIZE 4096
+#define LOG_SIZE 4000
 #define METHOD_MAX_SIZE 100
 #define FILENAME_MAX_SIZE 256
 #define HTTPSIZE 100
@@ -122,7 +122,7 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
      * Must check if buffer includes header and body or just header (\r\n\r\n)
      * Must check if header length is <= 4 KiB, body can be any length
      */
-    
+    message->body_tracker = 0;
     ssize_t total_bytes_recv = 0;
     //ssize_t bytes_recv = recv(client_sockd, message->buffer, sizeof(message->buffer), 0);
     
@@ -265,6 +265,7 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
             }
             return;
         }
+        //handles 0 byte files
         int cont_len = message->content_length;
         if(cont_len == 0){
             if(message->status_code == 200){
@@ -274,10 +275,10 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
             }
             return;
         }
-
         if(message->body_tracker == 1){
             write(putfd, message->body_string, strlen(message->body_string));
         }
+        memset(body_buffer, '\0', BODY_BUFFER_SIZE);
         ssize_t bytes_recv = recv(client_sockd, body_buffer, BODY_BUFFER_SIZE, 0);
         //printf("first bytes_recv: %zu\n", bytes_recv);
         if(bytes_recv <= BODY_BUFFER_SIZE){             //check if bytes_recv is less than buffer size    
@@ -286,6 +287,7 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
                 //printf("in loop\n");
                 ssize_t bytes_written = write(putfd, body_buffer, bytes_recv);         //writes contents of body from request into the created file which is saved in the server
                 if(bytes_written < 0){
+                    printf("PUT: write 500\n");
                     message->status_code = 500;
                     dprintf(client_sockd, "%s %d Internal Server Error\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
                 }
@@ -295,16 +297,14 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
                 bytes_recv = recv(client_sockd, body_buffer, BODY_BUFFER_SIZE, 0);
             }
             if(message->status_code == 200){
-                
                 dprintf(client_sockd, "%s %d OK\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
             } else if(message->status_code == 201){
                 dprintf(client_sockd, "%s %d Created\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
             }
             close(putfd);
-            memset(body_buffer, '\0', BODY_BUFFER_SIZE);
             printf("done: %s\n", message->filename);
             return;
-        } 
+        }
     }
     //HANDLE GET REQUEST
     else if(strcmp(message->method, "GET") == 0){
@@ -403,78 +403,86 @@ void process_request(ssize_t client_sockd, struct httpObject* message) {
 size_t calc_hex_bytes(size_t file_size){
     size_t hex_bytes = 0;
     size_t extra_bytes = 0;
-    size_t extra_lines = 0;
+    size_t extra_chars = 0;
     size_t ret = 0;
-    //printf("in calc file size: %ld\n", file_size);
     hex_bytes = floor(file_size / 20);
-    //printf("bytes: %ld\n", hex_bytes);
     if(file_size % 20 != 0){
-        extra_lines = file_size % 20;
-        extra_bytes = 8 + extra_lines * 3 + 1;
+        extra_chars = file_size % 20;
+        printf("extra lines: %ld\n", extra_chars);
+        extra_bytes = 8 + extra_chars * 3 + 1;
         ret = (hex_bytes * 69) + extra_bytes;
-        //printf("ret: %ld\n", ret);
     } else {
         ret = hex_bytes * 69;
     }
-    return ret;
+    return ret - 1;
 }
-
 void log_func(int logfd, httpObject* msg){
     uint8_t logBuffer[LOG_SIZE];
     uint8_t fileBuffer[LOG_SIZE];
     char filelength[30];
-    //printf("in log func filename: %s\n", msg->filename);
-    //logBuffer[LOG_SIZE + 1] = '\0';
-    //printf("file_size: %ld\n", file_size);
     size_t filefd = open(msg->filename, O_RDONLY);
     size_t read_bytes = read(filefd, fileBuffer, LOG_SIZE);
     size_t file_size = get_file_size(msg->filename);
-    //printf( "in log func file size: %ld\n", file_size);
+    printf("file size: %ld\n", file_size);
     size_t hex_bytes = calc_hex_bytes(file_size);
-    //printf("hex bytes: %ld\n", hex_bytes);
-    //fileBuffer[LOG_SIZE + 1] = '\0';
-    sprintf(filelength, "%ld", file_size);
-    int cont_len = file_size;
-    size_t lead_zero = 0;
-    size_t bytes_written = 0;
+    printf("return bytes: %ld\n", hex_bytes);
     size_t file_len = strlen(filelength);
-    //printf("len: %ld\n", file_len);
     int namelen = strlen(msg->filename + 1);
     int methodlen = strlen(msg->method);
-    int fail_len = strlen(msg->copyBuffer);
-    int fail_bytes = 0;
-    int HEAD_bytes = 0;
-    int header_line = (methodlen + namelen + file_len + 11);
-    int footer_line = 10;
-    int full_calc = hex_bytes + header_line + footer_line;
-    pthread_mutex_lock(&offset_lock);
-    int local_offset = global_offset;
-    global_offset += full_calc;
-    pthread_mutex_unlock(&offset_lock);
+    int local_offset = 0;
+    sprintf(filelength, "%ld", file_size);
+    int cont_len = file_size;
+    //printf("initial cont_len: %d\n", cont_len);
+    //printf("initial read_bytes: %ld\n", read_bytes);
+    size_t lead_zero = 0;
+    size_t bytes_written = 0;
     if((msg->status_code == 400) | (msg->status_code == 404) | (msg->status_code == 403) | (msg->status_code == 500)){
-        bytes_written = snprintf((char*)logBuffer, (fail_len + 36) ,"FAIL: %s --- response %d\n========\n", msg->copyBuffer, msg->status_code);
-        fail_bytes = bytes_written;
-        //printf("%s\n", logBuffer);
-        pwrite(logfd, logBuffer, bytes_written, local_offset);
-        errors++;
-    } else if(strcmp(msg->method, "HEAD") == 0){
-        bytes_written = snprintf((char*)logBuffer, (methodlen + namelen + file_len + 23), "%s /%s length %zd\n========\n", msg->method, msg->filename, file_size);
-        HEAD_bytes = bytes_written;
-        pwrite(logfd, logBuffer, bytes_written, local_offset);
-    } else {
-        bytes_written = snprintf((char*)logBuffer, (methodlen + namelen + file_len + 13), "%s /%s length %zd\n", msg->method, msg->filename, file_size);      //header
-        pwrite(logfd, logBuffer, bytes_written, local_offset);
-        local_offset += bytes_written;
         memset(logBuffer, '\0', LOG_SIZE);
-        bytes_written = 0;
-        printf("header: %d\n", header_line);
+        bytes_written = snprintf((char*)logBuffer, LOG_SIZE, "FAIL: %s /%s %s --- response %d\n========\n", msg->method, msg->filename, msg->httpversion, msg->status_code);
+        pthread_mutex_lock(&offset_lock);
+        local_offset = global_offset;
+        global_offset += bytes_written;
+        entries++;
+        errors++;
+        pthread_mutex_unlock(&offset_lock);
+        pwrite(logfd, logBuffer, bytes_written, local_offset);
+        close(read_bytes);
+    } else if(strcmp(msg->method, "HEAD") == 0){
+        memset(logBuffer, '\0', LOG_SIZE);
+        bytes_written = snprintf((char*)logBuffer, LOG_SIZE, "%s /%s length %zd\n========\n", msg->method, msg->filename, file_size);
+        printf("bytes written: %ld\n", bytes_written);
+        pthread_mutex_lock(&offset_lock);
+        local_offset = global_offset;
+        global_offset += bytes_written;
+        entries++;
+        pthread_mutex_unlock(&offset_lock);
+        pwrite(logfd, logBuffer, bytes_written, local_offset);
+        close(read_bytes);
+    } else {
+        printf("-------------------------------------------------------------------\n");
+        int header_line = snprintf((char*)logBuffer, LOG_SIZE, "%s /%s length %zd\n", msg->method, msg->filename, file_size);
+        //int header_line = (methodlen + namelen + file_len + 10);
+        int footer_line = 10;
+        int full_calc = hex_bytes + header_line + footer_line;
+        //printf("header line: %ld\n", header_line);
+        pthread_mutex_lock(&offset_lock);
+        local_offset = global_offset;
+        global_offset += full_calc;
+        entries++;
+        pthread_mutex_unlock(&offset_lock);
+        //int header_line = snprintf((char*)logBuffer, LOG_SIZE, "%s /%s length %zd\n", msg->method, msg->filename, file_size);      //header
+        pwrite(logfd, logBuffer, header_line, local_offset);
+        local_offset += header_line;
+        memset(logBuffer, '\0', LOG_SIZE);
+        printf("header: %ld\n", header_line);
+        printf("after header local offset: %d\n", local_offset);
+        //bytes_written = 0;
         while(true){
             cont_len = cont_len - read_bytes;
             int count = 0;
             for(size_t idx = 0; idx < read_bytes; idx++){
-                //printf("in for loop\n");
-                printf("count: %d\n", count);
-                if(count > LOG_SIZE - 69){
+                //printf("count: %d\n", count);
+                if(count > LOG_SIZE + 69){
                     pwrite(logfd, logBuffer, count, local_offset);
                     local_offset += count;
                     memset(logBuffer, '\0', LOG_SIZE);
@@ -485,58 +493,35 @@ void log_func(int logfd, httpObject* msg){
                         bytes_written = snprintf((char*)logBuffer + count, 2, "\n");
                         count += bytes_written;
                     }
-                bytes_written = snprintf((char*)logBuffer + count, 10, "%08ld ", lead_zero);
+                bytes_written = snprintf((char*)logBuffer + count, LOG_SIZE, "%08ld", lead_zero);
                 lead_zero += 20;
                 count += bytes_written;
                 }
-                bytes_written = snprintf((char*)logBuffer + count, 4, "%02x ", fileBuffer[idx]);
+                bytes_written = snprintf((char*)logBuffer + count, LOG_SIZE, " %02x", fileBuffer[idx]);
                 count += bytes_written;
             }
-            bytes_written = 0;
-            //printf("%s\n", logBuffer);
-            printf("local offset: %d\n", local_offset);
-            printf("outside count: %d\n", count);
-            pwrite(logfd, logBuffer, count, local_offset);
-            local_offset += count;
-            //if(strlen((char*)logBuffer) == bytes_written){
-            bytes_written += snprintf((char*)logBuffer + bytes_written, 12, "\n========\n");       //footers
-            //printf("bytes written: %ld\n", bytes_written);
-            
-            pwrite(logfd, logBuffer, bytes_written, local_offset - 1);
-            local_offset += bytes_written;
-            //printf("local offset: %d\n", local_offset);
-            //}
             if(cont_len == 0){
+                printf("outside count: %d\n", count);
+                //printf("%s\n", logBuffer);
+                printf("after for loop local offset: %d\n", local_offset);
+                pwrite(logfd, logBuffer, count, local_offset);
+                local_offset += count;
                 memset(logBuffer, '\0', LOG_SIZE);
                 bytes_written = 0;
+                printf("after writing body local offset: %d\n", local_offset);
+                bytes_written += snprintf((char*)logBuffer + bytes_written, LOG_SIZE, "\n========\n");       //footers
+                pwrite(logfd, logBuffer, bytes_written, local_offset);
+                local_offset += bytes_written;
+                printf("after writing footer local offset: %d\n", local_offset);
                 break;
             }
             read_bytes = read(filefd, fileBuffer, LOG_SIZE);
             printf("read\n");
-            printf("cont len: %d\n",cont_len);
+            printf("after read cont len: %d\n",cont_len);  
         }
     }
-    entries++;
+    printf("global_offset: %d\n", global_offset);
     close(read_bytes);
-    //pwrite(logfd, logBuffer, LOG_SIZE, local_offset);
-    if(fail_bytes > 0){
-        printf("tf\n");
-        pthread_mutex_lock(&offset_lock);
-        global_offset = global_offset + fail_bytes;
-        pthread_mutex_unlock(&offset_lock);
-    } else if(HEAD_bytes > 0){
-        printf("how tf\n");
-        pthread_mutex_lock(&offset_lock);
-        global_offset = global_offset + HEAD_bytes;
-        pthread_mutex_unlock(&offset_lock);
-    }else {
-        //printf("%s", logBuffer);
-        //printf("entries: %d\n", entries);
-        //printf("errors: %d\n", errors);
-        printf("global_offset: %d\n", global_offset);
-        //printf("sizeof logBuffer: %ld\n", strlen((char*)logBuffer));
-        //printf("------------------------------\n");
-    }
 }
 
 void* thread_func(void* arg){   //dequeue from buffer
