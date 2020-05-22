@@ -19,9 +19,9 @@
 #define BUFFER_SIZE 4096
 #define BODY_BUFFER_SIZE 8000
 #define LOG_SIZE 4000
-#define METHOD_MAX_SIZE 100
+#define METHOD_MAX_SIZE 256
 #define FILENAME_MAX_SIZE 256
-#define HTTPSIZE 100
+#define HTTPSIZE 256
 #define HEALTH_BODY 1000
 
 int entries = 0;
@@ -181,11 +181,6 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
         dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
     }
-    if(strcmp(message->method, "POST") == 0){
-        message->status_code = 400;
-        dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
-        return;
-    }
     if(strcmp(message->method, "PUT") != 0 && strcmp(message->method, "GET") != 0 && strcmp(message->method, "HEAD") != 0){
         //printf("we in here big bruh\n");
         message->status_code = 400;
@@ -250,7 +245,7 @@ void process_request(ssize_t client_sockd, struct httpObject* message, int logfd
     int file_exists = if_exists(message->filename);
     int file_size = get_file_size(message->filename);
     int file_reg = is_regular_file(message->filename);
-    printf("status code: %d\n", message->status_code);
+    //printf("status code: %d\n", message->status_code);
     if(strcmp(message->method, "PUT") == 0){
         if(message->status_code == 400){
             return;
@@ -305,7 +300,7 @@ void process_request(ssize_t client_sockd, struct httpObject* message, int logfd
                 //printf("in loop\n");
                 ssize_t bytes_written = write(putfd, body_buffer, bytes_recv);         //writes contents of body from request into the created file which is saved in the server
                 if(bytes_written < 0){
-                    printf("PUT: write 500\n");
+                    //printf("PUT: write 500\n");
                     message->status_code = 500;
                     dprintf(client_sockd, "%s %d Internal Server Error\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
                 }
@@ -320,18 +315,19 @@ void process_request(ssize_t client_sockd, struct httpObject* message, int logfd
                 dprintf(client_sockd, "%s %d Created\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
             }
             close(putfd);
-            printf("done: %s\n", message->filename);
+            //printf("done: %s\n", message->filename);
             return;
         }
     }
     //HANDLE GET REQUEST
     else if(strcmp(message->method, "GET") == 0){
+        //printf("we in here\n");
          if(message->status_code == 400){
             return;
         }
         //printf("in GET: %s\n", message->filename);
         //printf("in GET client sockd: %zd\n", client_sockd);
-        printf("logfd: %d\n", message->logfd);
+        //printf("logfd: %d\n", message->logfd);
         if(strcmp(message->filename, "healthcheck") == 0 && logfd > 0){
             message->status_code = 200;
             char log_errors[100];
@@ -467,11 +463,11 @@ void log_func(int logfd, httpObject* msg){
     size_t filefd = open(msg->filename, O_RDONLY);
     //printf("file fd: %ld\n", filefd);
     size_t read_bytes = read(filefd, fileBuffer, LOG_SIZE);
-    printf("read_bytes: %ld\n", read_bytes);
-    printf("file size: %ld\n", file_size);
+    //printf("read_bytes: %ld\n", read_bytes);
+    //printf("file size: %ld\n", file_size);
     size_t hex_bytes = calc_hex_bytes(file_size);
-    printf("returned bytes: %ld\n", hex_bytes);
-    printf("healthcheck_Size: %d\n", msg->healthcheck_size);
+    //printf("returned bytes: %ld\n", hex_bytes);
+    //printf("healthcheck_Size: %d\n", msg->healthcheck_size);
     //size_t file_len = strlen(filelength);
     //int namelen = strlen(msg->filename + 1);
     //int methodlen = strlen(msg->method);
@@ -559,7 +555,6 @@ void log_func(int logfd, httpObject* msg){
                 bytes_written = snprintf((char*)logBuffer + count, LOG_SIZE, " %02x", log_ent[index]);
                 count += bytes_written;
             }
-            
             pwrite(logfd, logBuffer, count, local_offset);
             local_offset += count;
             memset(logBuffer, '\0', LOG_SIZE);
@@ -637,6 +632,7 @@ void log_func(int logfd, httpObject* msg){
 }
 void* thread_func(void* arg){   //dequeue from buffer
     threadArg *parg = (threadArg*) arg;
+    //httpObject message_t;
     httpObject *pmsg = &parg->cb->msg;
         while(true){
             //printf("--------------------------------------------\n");
