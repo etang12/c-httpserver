@@ -19,9 +19,9 @@
 #define BUFFER_SIZE 4096
 #define BODY_BUFFER_SIZE 8000
 #define LOG_SIZE 4000
-#define METHOD_MAX_SIZE 256
-#define FILENAME_MAX_SIZE 256
-#define HTTPSIZE 256
+#define METHOD_MAX_SIZE 500
+#define FILENAME_MAX_SIZE 500
+#define HTTPSIZE 500
 #define HEALTH_BODY 1000
 
 int entries = 0;
