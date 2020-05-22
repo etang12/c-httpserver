@@ -507,6 +507,10 @@ void log_func(int logfd, httpObject* msg){
         printf("-------------------------------------------------------------------\n");
         int footer_line = 9;
         if(strcmp(msg->filename, "healthcheck") == 0){
+            char log_err[100];
+            char log_ent[100];
+            sprintf(log_err, "%d", errors);
+            sprintf(log_ent, "%d", entries);
             int health_line = snprintf((char*)logBuffer, LOG_SIZE, "%s /%s length %d\n", msg->method, msg->filename, msg->healthcheck_size);
             size_t health_bytes = calc_hex_bytes(msg->healthcheck_size);
             int health_calc = health_bytes + health_line + footer_line;
@@ -534,12 +538,15 @@ void log_func(int logfd, httpObject* msg){
             bytes_written = snprintf((char*)logBuffer + count, LOG_SIZE, "%08ld", lead_zero);
             lead_zero += 20;
             count += bytes_written;
-            bytes_written = snprintf((char*)logBuffer + count, LOG_SIZE, " %02x", errors);
-            count += bytes_written;
-            bytes_written = snprintf((char*)logBuffer + count, LOG_SIZE, " %02x", '\n');
-            count += bytes_written;
-            bytes_written = snprintf((char*)logBuffer + count, LOG_SIZE, " %02x", entries);
-            count += bytes_written;
+            for(int index = 0; index < 1; index++){
+                bytes_written = snprintf((char*)logBuffer + count, LOG_SIZE, " %02x", log_err[index]);
+                count += bytes_written;
+                bytes_written = snprintf((char*)logBuffer + count, LOG_SIZE, " %02x", '\n');
+                count += bytes_written;
+                bytes_written = snprintf((char*)logBuffer + count, LOG_SIZE, " %02x", log_ent[index]);
+                count += bytes_written;
+            }
+            
             pwrite(logfd, logBuffer, count, local_offset);
             local_offset += count;
             memset(logBuffer, '\0', LOG_SIZE);
