@@ -250,10 +250,11 @@ void process_request(ssize_t client_sockd, struct httpObject* message, int logfd
     int file_exists = if_exists(message->filename);
     int file_size = get_file_size(message->filename);
     int file_reg = is_regular_file(message->filename);
-    if(message->status_code == 400){
-            return;
-    }
+    printf("status code: %d\n", message->status_code);
     if(strcmp(message->method, "PUT") == 0){
+        if(message->status_code == 400){
+            return;
+        }
         //printf("in PUT: %s\n", message->filename);
         if(strcmp(message->filename, "healthcheck") == 0){
             message->status_code = 403;
@@ -325,6 +326,9 @@ void process_request(ssize_t client_sockd, struct httpObject* message, int logfd
     }
     //HANDLE GET REQUEST
     else if(strcmp(message->method, "GET") == 0){
+         if(message->status_code == 400){
+            return;
+        }
         //printf("in GET: %s\n", message->filename);
         //printf("in GET client sockd: %zd\n", client_sockd);
         printf("logfd: %d\n", message->logfd);
