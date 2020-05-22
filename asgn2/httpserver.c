@@ -630,27 +630,34 @@ void log_func(int logfd, httpObject* msg){
     close(filefd);
     close(read_bytes);
 }
+
 void* thread_func(void* arg){   //dequeue from buffer
     threadArg *parg = (threadArg*) arg;
-    //httpObject message_t;
-    httpObject *pmsg = &parg->cb->msg;
+    struct httpObject *message = malloc(sizeof(httpObject));
+    //message = &parg->cb->msg;
         while(true){
             //printf("--------------------------------------------\n");
             pthread_mutex_lock(parg->cb->mut);
             int c_fd = cb_dequeue(parg->cb);
             pthread_mutex_unlock(parg->cb->mut);
             pthread_cond_signal(&dispatcher_cond);
-            read_http_request(c_fd, &parg->msg);
-            process_request(c_fd, &parg->msg, pmsg->logfd);
+            read_http_request(c_fd, message);
+            process_request(c_fd, message, message->logfd);
             if(parg->logfd > 0){
-                log_func(parg->logfd, &parg->msg);
+                log_func(parg->logfd, message);
             }
-            memset(&parg->msg.buffer, '\0', BUFFER_SIZE);
+            memset(message->buffer, '\0', BUFFER_SIZE);
+            memset(message->method, '\0', METHOD_MAX_SIZE);
+            memset(message->filename, '\0', FILENAME_MAX_SIZE);
+            memset(message->httpversion, '\0', HTTPSIZE);
+            /*memset(&parg->msg.buffer, '\0', BUFFER_SIZE);
             memset(&parg->msg.method, '\0', METHOD_MAX_SIZE);
             memset(&parg->msg.filename, '\0', FILENAME_MAX_SIZE);
-            memset(&parg->msg.httpversion, '\0', HTTPSIZE);
+            memset(&parg->msg.httpversion, '\0', HTTPSIZE);*/
+            
             close(c_fd);
         }
+    free(message);
     return NULL;
 }
 
@@ -708,7 +715,7 @@ int main(int argc, char** argv) {
     threadArg args[NUM_THREADS];
     int c_queue[NUM_THREADS * 2];
     circleBuffer circleBuff;
-    struct httpObject message;
+    //struct httpObject message;
     pthread_mutex_t(mutex) = PTHREAD_MUTEX_INITIALIZER;
     circleBuff.number_threads = NUM_THREADS;
     circleBuff.clientfd_queue = c_queue;
@@ -722,7 +729,7 @@ int main(int argc, char** argv) {
     
     while(i < NUM_THREADS){
         args[i].cb = &circleBuff;
-        args[i].msg = message;
+        //args[i].msg = message;
         args[i].logfd = logfd;
         pthread_create(&tid[i], NULL, thread_func, &args[i]);
         i++;
