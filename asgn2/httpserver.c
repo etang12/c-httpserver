@@ -162,6 +162,7 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
 
     if(strlen(message->filename) > 28){
         //printf("filename: %s\n", message->filename);
+        printf("in this hoe\n");
         message->status_code = 400;
         dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
@@ -249,6 +250,9 @@ void process_request(ssize_t client_sockd, struct httpObject* message, int logfd
     int file_exists = if_exists(message->filename);
     int file_size = get_file_size(message->filename);
     int file_reg = is_regular_file(message->filename);
+    if(message->status_code == 400){
+            return;
+    }
     if(strcmp(message->method, "PUT") == 0){
         //printf("in PUT: %s\n", message->filename);
         if(strcmp(message->filename, "healthcheck") == 0){
