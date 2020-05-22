@@ -180,6 +180,11 @@ void read_http_request(ssize_t client_sockd, struct httpObject* message) {
         dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
         return;
     }
+    if(strcmp(message->method, "POST") == 0){
+        message->status_code = 400;
+        dprintf(client_sockd, "%s %d Bad Request\r\nContent-Length: %d\r\n\r\n", message->httpversion, message->status_code, 0);
+        return;
+    }
     if(strcmp(message->method, "PUT") != 0 && strcmp(message->method, "GET") != 0 && strcmp(message->method, "HEAD") != 0){
         //printf("we in here big bruh\n");
         message->status_code = 400;
@@ -565,26 +570,13 @@ void log_func(int logfd, httpObject* msg){
             global_offset += full_calc;
             entries++;
             pthread_mutex_unlock(&offset_lock);
-            //int header_line = snprintf((char*)logBuffer, LOG_SIZE, "%s /%s length %zd\n", msg->method, msg->filename, file_size);      //header
             pwrite(logfd, logBuffer, header_line, local_offset);
             local_offset += header_line;
             memset(logBuffer, '\0', LOG_SIZE);
-            //printf("header: %d\n", header_line);
-            //printf("after header local offset: %d\n", local_offset);
-            //bytes_written = 0;
             while(true){
                 cont_len = cont_len - read_bytes;
                 int count = 0;
                 for(size_t idx = 0; idx < read_bytes; idx++){
-                    //printf("count: %d\n", count);
-                    /*if(count > LOG_SIZE + 69){
-                        printf("for loop count: %d\n", count);
-                        pwrite(logfd, logBuffer, count, local_offset);
-                        local_offset += count;
-                        printf("for loop local offset: %d\n", local_offset);
-                        //memset(logBuffer, '\0', LOG_SIZE);
-                        count = 0;
-                    }*/
                     if(idx % 20 == 0){
                         if(idx != 0){
                             bytes_written = snprintf((char*)logBuffer + count, 2, "\n");
@@ -627,8 +619,6 @@ void log_func(int logfd, httpObject* msg){
                     break;
                 }
                 read_bytes = read(filefd, fileBuffer, LOG_SIZE);
-                //printf("read\n");
-                //printf("after read cont len: %d\n",cont_len);  
             }
         }
         
@@ -637,7 +627,6 @@ void log_func(int logfd, httpObject* msg){
     close(filefd);
     close(read_bytes);
 }
-
 void* thread_func(void* arg){   //dequeue from buffer
     threadArg *parg = (threadArg*) arg;
     httpObject *pmsg = &parg->cb->msg;
@@ -647,7 +636,6 @@ void* thread_func(void* arg){   //dequeue from buffer
             int c_fd = cb_dequeue(parg->cb);
             pthread_mutex_unlock(parg->cb->mut);
             pthread_cond_signal(&dispatcher_cond);
-            //printf("logfd in thread func: %d\n", pmsg->logfd);
             read_http_request(c_fd, &parg->msg);
             process_request(c_fd, &parg->msg, pmsg->logfd);
             if(parg->logfd > 0){
