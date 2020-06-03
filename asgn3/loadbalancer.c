@@ -19,8 +19,13 @@ typedef struct server_info_t {
     int port;
     int entries;
     int errors;
+    int status_code;
+    int healthcheck_len;
+    int serverfd;
+    int success_rate;
+    int min_index;
+    char* status_msg;
     bool alive; //set to false initially
-    
 } ServerInfo;
 
 typedef struct servers_t {
@@ -46,28 +51,6 @@ typedef struct threadarg_t {
  
 Servers servers;
 
-/*void healthchecker() {
-    pthread_mutex_lock(&servers.mut);
-    pthread_mutex_unlock(&servers.mut);
-}*/
-
-int init_servers(int argc, char** argv, int start_of_ports) {
-    servers.num_servers = argc - start_of_ports;
-    if(servers.num_servers <= 0) {
-        printf("Error: specify server httpserver ports");
-        return -1;
-    }
-    servers.servers = malloc(servers.num_servers * sizeof(ServerInfo));
-    pthread_mutex_init(&servers.mut, NULL);
-    for(int idx = start_of_ports; idx < argc; idx++) {
-        int sidx = idx - start_of_ports;
-        servers.servers[sidx].port = atoi(argv[idx]);
-        servers.servers[sidx].alive = false;
-        printf("server index: %d\n", sidx);
-        printf("server port: %d\n", servers.servers[sidx].port);
-    }
-    return 0;
-}
 
 int cb_dequeue(circleBuffer *cb){
     int client_fd;
@@ -86,7 +69,7 @@ int cb_dequeue(circleBuffer *cb){
         cb->head++;
     }
     cb->q_size--;
-    printf("dequeued: %d\n", client_fd);
+    //printf("dequeued: %d\n", client_fd);
     return client_fd;
 }
 
@@ -105,7 +88,7 @@ void cb_enqueue(circleBuffer *cb, int client){
         cb->tail++;
         cb->clientfd_queue[cb->tail] = client;
     }
-    printf("enqueued: %d\n", cb->clientfd_queue[cb->tail]);
+    //printf("enqueued: %d\n", cb->clientfd_queue[cb->tail]);
     cb->q_size++;
 }
 
@@ -151,7 +134,7 @@ int server_listen(int port) {
         return -1;
     memset(&servaddr, 0, sizeof servaddr);
     servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = htons(INADDR_ANY);
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     servaddr.sin_port = htons(port);
 
     if(setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0)
@@ -172,21 +155,21 @@ int bridge_connections(int fromfd, int tofd) {
     char recvline[4096];
     int n = recv(fromfd, recvline, 4096, 0);
     if (n < 0) {
-        printf("connection error receiving\n");
+        //printf("connection error receiving\n");
         return -1;
     } else if (n == 0) {
-        printf("receiving connection ended\n");
+        //printf("receiving connection ended\n");
         return 0;
     }
     recvline[n] = '\0';
-    printf("%s", recvline);
+    //printf("%s", recvline);
     //sleep(1);
     n = send(tofd, recvline, n, 0);
     if (n < 0) {
-        printf("connection error sending\n");
+        //printf("connection error sending\n");
         return -1;
     } else if (n == 0) {
-        printf("sending connection ended\n");
+        //printf("sending connection ended\n");
         return 0;
     }
     memset(recvline, '\0', sizeof(recvline));
@@ -217,10 +200,10 @@ void bridge_loop(int sockfd1, int sockfd2) {
         // select return the number of file descriptors ready for reading in set
         switch (select(FD_SETSIZE, &set, NULL, NULL, &timeout)) {
             case -1:
-                printf("error during select, exiting\n");
+                //printf("error during select, exiting\n");
                 return;
             case 0:
-                printf("both channels are idle, waiting again\n");
+                //printf("both channels are idle, waiting again\n");
                 continue;
             default:
                 if (FD_ISSET(sockfd1, &set)) {
@@ -230,33 +213,101 @@ void bridge_loop(int sockfd1, int sockfd2) {
                     fromfd = sockfd2;
                     tofd = sockfd1;
                 } else {
-                    printf("this should be unreachable\n");
+                    //printf("this should be unreachable\n");
                     return;
                 }
         }
-        printf("fromfd in bridge loop: %d\n", fromfd);
-        printf("tofd in bridge loop: %d\n", tofd);
+        //printf("fromfd in bridge loop: %d\n", fromfd);
+        //printf("tofd in bridge loop: %d\n", tofd);
         if (bridge_connections(fromfd, tofd) <= 0){
             return;
         }
     }
 }
 
+void healthcheck_func() {              //health check thread, sends health check to all servers
+    int conn_fd;
+    char healthheader[1000];
+    char healthbody[1000];
+    //sends health check to servers and saves server response inside server struct
+    for(int idx = 0; idx < servers.num_servers; idx++) {
+        //health check to servers.servers[i].port
+        //update servers.servers[idx]
+        //printf("number of servers: %d\n", servers.num_servers);
+        //printf("server port: %d\n", servers.servers[idx].port);
+        if ((conn_fd = client_connect(servers.servers[idx].port)) < 0)
+            err(1, "failed connecting");
+        //printf("connfd inside healthcheck: %d\n", conn_fd);
+        dprintf(conn_fd, "GET /healthcheck HTTP/1.1\r\n\r\n");
+        int recv_bytes = recv(conn_fd, healthheader, sizeof(healthheader), 0);
+        sscanf(healthheader, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n", &servers.servers[idx].status_code, servers.servers[idx].status_msg, &servers.servers[idx].healthcheck_len);
+        recv_bytes = recv(conn_fd, healthbody, servers.servers[idx].healthcheck_len, 0);
+        sscanf(healthbody, "%d\n%d", &servers.servers[idx].errors, &servers.servers[idx].entries);
+        //printf("%s\n", healthheader);
+        printf("status: %d\nerrors: %d\nentries: %d\n\n", servers.servers[idx].status_code, servers.servers[idx].errors, servers.servers[idx].entries);
+        if(servers.servers[idx].status_code == 200 || servers.servers[idx].status_code == 201) {
+            servers.servers[idx].alive = true;
+            if(servers.servers[idx].entries != 0)
+                servers.servers[idx].success_rate = (1 - (servers.servers[idx].errors / servers.servers[idx].entries));
+        }
+        close(conn_fd);
+    }
+    //compares servers with each other, saves minimum entries, if same entries then compares success rate, determines which server port should be sent connections first
+    int min = servers.servers[0].entries;
+    int minidx = 0;
+    for(int idx = 1; idx < servers.num_servers; idx++) {
+        if(servers.servers[idx].entries < min){     //server at current idx has less entries than previous minimum
+            min = servers.servers[idx].entries;
+            minidx = idx;
+        } else if(servers.servers[idx].entries == min) {        //server at current idx has same entries as previous minimum
+            if(servers.servers[idx].success_rate > servers.servers[minidx].success_rate){
+                min = servers.servers[idx].entries;
+                minidx = idx;
+            } else {
+                min = servers.servers[idx].entries;
+                minidx = idx;
+            }
+        }
+    }
+    servers.servers->min_index = minidx;
+}
+
+int init_servers(int argc, char** argv, int start_of_ports) {
+    servers.num_servers = argc - start_of_ports;
+    if(servers.num_servers <= 0) {
+        printf("Error: specify server httpserver ports");
+        return -1;
+    }
+    servers.servers = malloc(servers.num_servers * sizeof(ServerInfo));
+    pthread_mutex_init(&servers.mut, NULL);
+    for(int idx = start_of_ports; idx < argc; idx++) {
+        int sidx = idx - start_of_ports;
+        servers.servers[sidx].port = atoi(argv[idx]);
+        servers.servers[sidx].alive = false;
+        //printf("server index: %d\n", sidx);
+        //printf("server port: %d\n", servers.servers[sidx].port);
+    }
+    pthread_mutex_lock(&servers.mut);
+    healthcheck_func();
+    pthread_mutex_unlock(&servers.mut);
+    return 0;
+}
+
 void* thread_func(void* arg) {
     int conn_fd;
     threadArg *parg = (threadArg*) arg;
     while(1){
-        if ((conn_fd = client_connect(parg->c_port)) < 0)
+        if ((conn_fd = client_connect(servers.servers[servers.servers->min_index].port)) < 0)
             err(1, "failed connecting");
+        //printf("port number: %d\n", servers.servers[servers.servers->min_index].port);
+        //printf("server fd: %d\n", conn_fd);
         pthread_mutex_lock(parg->cb->cmut);
         int c_fd = cb_dequeue(parg->cb);
-        printf("c_fd: %d\n", c_fd);
-        printf("server fd: %d\n", conn_fd);
+        //printf("c_fd: %d\n", c_fd);
         pthread_mutex_unlock(parg->cb->cmut);
         pthread_cond_signal(&dispatcher_cond);
         bridge_loop(c_fd, conn_fd);
         close(c_fd);
-        printf("just closed c_fd\n");
         close(conn_fd);
     }
 }
@@ -266,9 +317,8 @@ int main(int argc,char **argv) {
     uint16_t connectport, listenport;
     int c, i, x, num_requests, num_connections = 0;
     
-
     if (argc < 3) {
-        printf("missing arguments: usage %s port_to_connect port_to_listen", argv[0]);
+        //printf("missing arguments: usage %s port_to_connect port_to_listen", argv[0]);
         return 1;
     }
 
@@ -314,11 +364,11 @@ int main(int argc,char **argv) {
     circleBuff.head = -1;
     circleBuff.tail = -1;
     circleBuff.cmut = &cmutex;
-    printf("num connections: %d\n", num_connections);
+    //printf("num connections: %d\n", num_connections);
 
     while(i < num_connections) {
         args[i].cb = &circleBuff;
-        args[i].c_port = connectport;
+        //args[i].c_port = connectport;
         //if ((connfd = client_connect(connectport)) < 0)
         //    err(1, "failed connecting");
         //printf("connfd: %d\n", connfd);
@@ -339,8 +389,4 @@ int main(int argc,char **argv) {
         pthread_mutex_unlock(circleBuff.cmut);
         pthread_cond_signal(&worker_cond);
     }
-
-    // This is a sample on how to bridge connections.
-    // Modify as needed.
-    //bridge_loop(acceptfd, connfd);
 }
