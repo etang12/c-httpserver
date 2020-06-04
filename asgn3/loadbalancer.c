@@ -14,6 +14,7 @@
 
 pthread_cond_t dispatcher_cond = PTHREAD_COND_INITIALIZER;
 pthread_cond_t worker_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t time_cond = PTHREAD_COND_INITIALIZER;
 
 typedef struct server_info_t {
     int port;
@@ -30,6 +31,7 @@ typedef struct server_info_t {
 
 typedef struct servers_t {
     int num_servers;
+    int time_sec;
     ServerInfo *servers;
     pthread_mutex_t mut;
 } Servers;
@@ -69,7 +71,7 @@ int cb_dequeue(circleBuffer *cb){
         cb->head++;
     }
     cb->q_size--;
-    //printf("dequeued: %d\n", client_fd);
+    printf("dequeued: %d\n", client_fd);
     return client_fd;
 }
 
@@ -88,7 +90,7 @@ void cb_enqueue(circleBuffer *cb, int client){
         cb->tail++;
         cb->clientfd_queue[cb->tail] = client;
     }
-    //printf("enqueued: %d\n", cb->clientfd_queue[cb->tail]);
+    printf("enqueued: %d\n", cb->clientfd_queue[cb->tail]);
     cb->q_size++;
 }
 
@@ -230,6 +232,8 @@ void healthcheck_func() {              //health check thread, sends health check
     char healthheader[1000];
     char healthbody[1000];
     //sends health check to servers and saves server response inside server struct
+    //pthread_mutex_lock(&servers.mut);
+    //pthread_cond_timedwait(&time_cond, &servers.mut, servers.time_sec);
     for(int idx = 0; idx < servers.num_servers; idx++) {
         //health check to servers.servers[i].port
         //update servers.servers[idx]
@@ -270,6 +274,7 @@ void healthcheck_func() {              //health check thread, sends health check
         }
     }
     servers.servers->min_index = minidx;
+    //pthread_mutex_unlock(&servers.mut);
 }
 
 int init_servers(int argc, char** argv, int start_of_ports) {
@@ -287,10 +292,11 @@ int init_servers(int argc, char** argv, int start_of_ports) {
         //printf("server index: %d\n", sidx);
         //printf("server port: %d\n", servers.servers[sidx].port);
     }
-    pthread_mutex_lock(&servers.mut);
-    healthcheck_func();
-    pthread_mutex_unlock(&servers.mut);
     return 0;
+}
+
+void* healththread_func() {
+    healthcheck_func();
 }
 
 void* thread_func(void* arg) {
@@ -313,9 +319,9 @@ void* thread_func(void* arg) {
 }
 
 int main(int argc,char **argv) {
-    int connfd, listenfd, acceptfd;
+    int listenfd, acceptfd;
     uint16_t connectport, listenport;
-    int c, i, x, num_requests, num_connections = 0;
+    int c, i, num_requests, num_connections = 0;
     
     if (argc < 3) {
         //printf("missing arguments: usage %s port_to_connect port_to_listen", argv[0]);
@@ -349,6 +355,10 @@ int main(int argc,char **argv) {
     if(num_requests == 0) {     //number of requests that are handled before a health check is requested again
         num_requests = 5;
     }
+
+    pthread_t hcthread;
+    pthread_create(&hcthread, NULL, healththread_func, NULL);
+
     int c_queue[num_connections];
     connectport = atoi(argv[optind + 1]);    //port of server that client connects to
     listenport = atoi(argv[optind]);      //port that listens for incoming client connections
@@ -376,6 +386,7 @@ int main(int argc,char **argv) {
         pthread_create(&tid[i], NULL, thread_func, &args[i]);
         i++;
     }
+    printf("past thread creation\n");
 
     if ((listenfd = server_listen(listenport)) < 0)
         err(1, "failed listening");
@@ -383,7 +394,7 @@ int main(int argc,char **argv) {
     while(1){
         if ((acceptfd = accept(listenfd, NULL, NULL)) < 0)
             err(1, "failed accepting");
-        //printf("acceptfd: %d\n", acceptfd);
+        printf("acceptfd: %d\n", acceptfd);
         pthread_mutex_lock(circleBuff.cmut);
         cb_enqueue(&circleBuff, acceptfd);
         pthread_mutex_unlock(circleBuff.cmut);
