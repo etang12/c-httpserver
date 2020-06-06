@@ -1,1 +1,2 @@
-edit me
+run program by starting up multiple http servers (running binary in different terminals) and connecting to them with the loadbalancer.
+Program is not completed because the health check is not fully implemented, has trouble forwarding connections to least loaded servers.
