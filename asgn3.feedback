@@ -1,0 +1,101 @@
+"--> Running asgn3.test.01 (Test if loadbalancer can GET a small file.) ... SUCCESS!
+--> Running asgn3.test.02 (Test if loadbalancer can GET a large file.) ... SUCCESS!
+--> Running asgn3.test.03 (Test if loadbalancer can PUT a small file.) ... SUCCESS!
+--> Running asgn3.test.04 (Test if loadbalancer can PUT a large file.) ... SUCCESS!
+--> Running asgn3.test.05 (Test if loadbalancer can process a HEAD request.) ... SUCCESS!
+--> Running asgn3.test.06 (Test if loadbalancer can handle concurrent GET/HEAD/PUT (different resource).) ... SUCCESS!
+--> Running asgn3.test.07 (Test if loadbalancer can handle concurrent GET/HEAD (same resource).) ... SUCCESS!
+--> Running asgn3.test.08 (Test if loadbalancer can handle a 400 error.) ... SUCCESS!
+--> Running asgn3.test.09 (Test if loadbalancer can handle a 404 error.) ... SUCCESS!
+--> Running asgn3.test.10 (Test if loadbalancer can handle concurrent 400 and 404 requests.) ... SUCCESS!
+--> Running asgn3.test.11 (Test if loadbalancer can forward a GET request to the least loaded server (2 servers have the same load)) ... SUCCESS!
+--> Running asgn3.test.12 (Test if loadbalancer can forward a PUT request to the least loaded server (2 servers have the same load)) ... SUCCESS!
+--> Running asgn3.test.13 (Test if loadbalacer can forward traffic to the least loaded server (each server has a different load)) ... SUCCESS!
+--> Running asgn3.test.14 (Test if loadblancer can forward traffic to the least loaded server (many servers have the same load)) ... failure!
+++++ First 200 characters of standard error for test asgn3.test.14 are: ++++
+bash: line 25: 12225 Terminated              ./httpserver 8214 -L -e 3 -t 200 &> /dev/null
+bash: line 25: 12226 Terminated              ./httpserver 8314 -L -e 3 -t 200 &> /dev/null
+bash: line 25: 122
+++++ end ++++
+---- Test feedback ----
+Start 7 httpserver instances (3 groups). One server has the least load (error count and total number of requests). Start the least loaded httpserver in a different working directory. 3 different servers have a particular load (servers in this group have the same load) and 3 different servers have the highest load (again servers in this group have the same load). Create a small text file in the directory of the least loaded server with a valid server side name. Start the loadbalancer (-R 1). Send a small request (HEAD) using curl to the loadbalalncer to trigger a healthcheck probe. After that, send a GET request for the text file to the load balancer. Save the output using curl's -o option. Verify that output file matches the contents of the small text file in the least loaded servers working directory.
+---- end ----
+--> Running asgn3.test.15 (Test if loadbalancer can handle concurrent connections from multiple clients) ... failure!
+++++ First 200 characters of standard error for test asgn3.test.15 are: ++++
+bash: line 25: 28588 Terminated              ./httpserver 8215 -L -e 3 -t 200 &> /dev/null
+bash: line 26: 28590 Terminated              ./httpserver 8315 -L -e 3 -t 200 &> /dev/null
+bash: line 26: 314
+++++ end ++++
+---- Test feedback ----
+Start 3 httpserver instances (3 groups). One server has the least load (error count and total number of requests). Start the least loaded httpserver in a different working directory. 3The two other server instances have different loads. Create two small text files in the directory of the least loaded server with a valid server side names. An another small binary file intended to be sent. Start the loadbalancer (-R 1). Send a small request (HEAD) using curl to the loadbalalncer to trigger a healthcheck probe. After that, send 2 GET requests, one for each of the text files to the load balancer. Also send a PUT request to the loadbalancer using curl (-T) with the contents being the small binary file. Save the output using curl's -o option. Run these commands in parallel using &, and save their output using the -o <output-file> option. Use the keyword wait so that the script waits for all commands running in the background (&) to finish.  Verify that output files match the contents of the small text files in the least loaded servers working directory as well as the binary file (that shoudl have been created in the directory as well).
+---- end ----
+--> Running asgn3.test.16 (Test if loadbalancer can detect a single server going down) ... SUCCESS!
+--> Running asgn3.test.17 (Test if loadbalancer can detect multiple servers going down) ... SUCCESS!
+--> Running asgn3.test.18 (Test if loadblancer can detect if all servers are down initially (500 error)) ... failure!
+++++ First 200 characters of standard error for test asgn3.test.18 are: ++++
+loadbalancer: failed connecting: Connection refused
+
+++++ end ++++
+---- Test feedback ----
+Start the loadbalancer (-R 1). No server instances are started. Send a small request (HEAD) using curl to the loadbalalncer to trigger a healthcheck probe. Save the response code to a file using the --write-out "%{http_code}\n" and redirecting (>) the output to a file. Verify the response code is a 500 with grep.
+---- end ----
+--> Running asgn3.test.19 (Test if loadbalancer can detect if all servers are non-responsive (500 error)) ... failure!
+++++ First 200 characters of standard error for test asgn3.test.19 are: ++++
+loadbalancer: failed connecting: loadbalancer: failed connecting: Connection refused
+Connection refused
+bash: line 18: 18764 Terminated              ncat -lp 8119
+bash: line 19: 18765 Terminated      
+++++ end ++++
+---- Test feedback ----
+Start 3 instances of ncat as servers (ncat -lp <port>). Start the loadbalancer (-R 1). Wait for loadbalancer to send it's inital healthcheck probe. The loadbalancer should timeout on each request. Restart the ncat instances (presumably dead) since the processes terminate after the connection is closed. Send a GET request to a file that does not exist using curl. Save the response code using the --write-out "%{http_code}" option to a file. Verify that the response code is 500 using grep.
+---- end ----
+--> Running asgn3.test.20 (Test if loadbalancer can detect a server going down and coming back up) ... failure!
+++++ First 200 characters of standard error for test asgn3.test.20 are: ++++
+loadbalancer: failed connecting: Connection refused
+bash: line 19: 21577 Killed                  ./httpserver 8320 -L -e 69 -t 420 &> /dev/null
+bash: line 34: 17458 Terminated              ./httpserve
+++++ end ++++
+---- Test feedback ----
+Start 3 httpserver instances. One server has the highest load (error count and total number of requests). The two other server instances have much lower loads and are different. Start these httpservers in a different working directory. Create a small text file. Start the loadbalancer (-R 1). Send a small request (HEAD) using curl to the loadbalalncer to trigger a healthcheck probe. After that, kill the server process with the highest load. Send another small request (HEAD) using curl to trigger a second health check probe. Send a PUT request using curl to the loadbalancer with the small text file as the source target. The file should now be in the directory with the two other servers. Start another server instance, except with zero load. Send another small request (HEAD) using curl to trigger a second health check probe. Create a small text file with the same file name as the one in the directory with the other servers, but with different contents. Send a GET request to the loadbalancer using curl for that specific file and save the output using the -o  option. Verify that the output file matches the second text file that was created (different than the version in the directory than the other two servers).
+---- end ----
+--> Running asgn3.test.21 (Test if loadbalancer can detect invalid healthcheck responses (status code != 200)) ... SUCCESS!
+--> Running asgn3.test.22 (Test if loadbalancer can handle concurrent connections from multiple clients (loadbalancer.N > sum(servers.N))) ... SUCCESS!
+--> Running asgn3.test.23 (Test if loadbalancer can handle concurrent connections from multiple clients (loadbalancer.N < sum(servers.N))) ... failure!
+++++ First 200 characters of standard error for test asgn3.test.23 are: ++++
+bash: line 16: 30010 Terminated              ./httpserver 8223 -L -e 10 -t 5000 &> /dev/null
+bash: line 16:   372 Terminated              ./loadbalancer -N 6 8023 8123 8323 8323 -R 4
+bash: line 17: 30
+++++ end ++++
+---- Test feedback ----
+Start 3 httpserver instances. One server has the least load (error count and total number of requests). Start the least loaded httpserver in a different working directory. The two other server instances have different loads. Create 30 small files, each with a different size in the directory of the least loaded server with a valid server side names. Start the loadbalancer (-R 4 -N 6). After that, send 30 GET requests, one for each of the files created to the load balancer. Run these commands in parallel using &, and save their output using the -o <output-file> option. Use the keyword wait so that the script waits for all commands running in the background (&) to finish. Verify that output files match the contents of the small files created.
+---- end ----
+--> Running asgn3.test.24 (Test if loadblancer can detect if all servers are up initially, and go down (500 error)) ... failure!
+++++ First 200 characters of standard error for test asgn3.test.24 are: ++++
+bash: line 15:  9290 Terminated              ./httpserver 8124 -L -e 6 -t 100 &> /dev/null
+bash: line 16:  9292 Terminated              ./httpserver 8224 -L -e 6 -t 100 &> /dev/null
+bash: line 16:  92
+++++ end ++++
+---- Test feedback ----
+Start 3 httpserver instances each with a different load. Start the loadbalancer (-R 1). Send a small request (HEAD) using curl to the loadbalalncer to trigger a healthcheck probe. After that, kill all httpserver instances. Send another small request (HEAD) using curl to the loadbalalncer to trigger a healthcheck probe. The send a GET request to a file that does not exist and redirect (>)  the response code to a file using the --write-out "%{http_code}" Verify that the response code is 500 using grep.
+---- end ----
+--> Running asgn3.test.25 (Test if loadbalancer can detect malformed healthcheck responses) ... failure!
+++++ First 200 characters of standard error for test asgn3.test.25 are: ++++
+loadbalancer: failed connecting: Connection refused
+bash: line 18: 31466 Killed                  ( while true; do
+    ncat -lp 8125 < _testtmp/bad-hc.rsp;
+done )
+
+++++ end ++++
+---- Test feedback ----
+Create a malformed healthcheck file using printf "a\nb" and redirect (>) that to a <hc-file>. Run ncat in listen mode (-lp <port>) in a loop forever which takes input (<) from <hc-file>. Start the loadbalancer (-R 1). Send a small request (HEAD) using curl to the loadbalalncer to trigger a healthcheck probe. After that, send a GET request to some resource and redirect (>)  the response code to a file using the --write-out "%{http_code}" Verify that the response code is 500 using grep.
+---- end ----
+--> Running asgn3.test.26 (Test if loadbalancer can forward traffic to a server that becomes the least loaded (external requests)) ... failure!
+++++ First 200 characters of standard error for test asgn3.test.26 are: ++++
+bash: line 27: 13010 Terminated              ./httpserver 8126 -L -e 6 -t 10 &> /dev/null
+bash: line 27: 13011 Terminated              ./httpserver 8326 -L -e 6 -t 100 &> /dev/null
+bash: line 27: 1574
+++++ end ++++
+---- Test feedback ----
+Start 3 httpserver instances. Each server has a different load. The second least loaded server runs in a different working directory. Create a small text file in the directory of the second least loaded server. Start the loadbalancer (-R 1). Send a small request (HEAD) using curl to the loadbalalncer to trigger a healthcheck probe. After that, send 40 small requests (HEAD) directly to the least loaded server (not through the laodbalancer). The load counts should now shift and the second least loaded server now becomes the least loaded server. Send another small request (HEAD) using curl to trigger a second health check probe. Then send a GET request to the loadbalancer using curl for the specific file created earlier and save the output using the -o  option. Verify that the output file matches the text file that was created.
+---- end ----
+"
